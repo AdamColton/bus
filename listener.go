@@ -87,6 +87,8 @@ func (lm *ListenerMux) Register(handler interface{}) (reflect.Type, error) {
 	switch v.Kind() {
 	case reflect.Func:
 		return lm.registerFunc(v)
+	case reflect.Chan:
+		return lm.registerChan(v)
 	}
 	return nil, errors.New("Register requires a func")
 }
@@ -98,5 +100,15 @@ func (lm *ListenerMux) registerFunc(v reflect.Value) (reflect.Type, error) {
 	}
 	argType := t.In(0)
 	lm.handlers[argType] = append(lm.handlers[argType], v)
+	return argType, nil
+}
+
+func (lm *ListenerMux) registerChan(v reflect.Value) (reflect.Type, error) {
+	t := v.Type()
+	argType := t.Elem()
+	fn := func(i interface{}) {
+		v.Send(reflect.ValueOf(i))
+	}
+	lm.handlers[argType] = append(lm.handlers[argType], reflect.ValueOf(fn))
 	return argType, nil
 }

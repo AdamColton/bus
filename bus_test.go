@@ -28,18 +28,20 @@ func TestBus(t *testing.T) {
 	errHdlr := func(err error) {
 		strCh <- err.Error()
 	}
+	fooChan := make(chan *Foo)
 
 	ifcCh := make(chan interface{})
-	bml, err := RunNewListenerMux(ifcCh, nil, fooHdlr)
+	ml, err := RunNewListenerMux(ifcCh, nil, fooHdlr, fooChan)
 	assert.NoError(t, err)
-	bml.ErrHandler = errHdlr
+	ml.ErrHandler = errHdlr
 
 	ifcCh <- &Foo{Name: "this is a test"}
 
 	assert.Equal(t, "this is a test", <-strCh)
 	assert.Equal(t, "test error", <-strCh)
+	assert.Equal(t, "this is a test", (<-fooChan).Name)
 
-	bml.Stop()
+	ml.Stop()
 }
 
 func TestJSON(t *testing.T) {
