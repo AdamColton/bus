@@ -22,24 +22,27 @@ func (sbs *SerialBusSender) Send(msg interface{}) error {
 	return nil
 }
 
+// SerialMultiBusSender allows one message to be sent to multiple channels.
 type SerialMultiBusSender struct {
 	Chans     map[string]chan<- []byte
 	Serialize func(i interface{}) ([]byte, error)
 }
 
-func (smbs *SerialMultiBusSender) Send(msg interface{}, keys ...string) error {
+// Send a message to the ids provided. If no ids are provided, the message will
+// be sent to all channels.
+func (smbs *SerialMultiBusSender) Send(msg interface{}, ids ...string) error {
 	b, err := smbs.Serialize(msg)
 	if err != nil {
 		return err
 	}
 
-	if len(keys) == 0 {
+	if len(ids) == 0 {
 		for _, ch := range smbs.Chans {
 			ch <- b
 		}
 	} else {
-		for _, key := range keys {
-			if ch, found := smbs.Chans[key]; found {
+		for _, id := range ids {
+			if ch, found := smbs.Chans[id]; found {
 				ch <- b
 			}
 		}
@@ -151,4 +154,25 @@ func (sbl *SerialBusListener) Register(handler interface{}) error {
 	}
 	i := reflect.New(t).Elem().Interface()
 	return sbl.r.Register(i)
+}
+
+// RegisterHandlerType is a bit of reflection magic. It takes a object and
+// iterates over it's methods. Any methods that start with "Handler" will be
+// registered with the underlying ListenerMux. If there is a method named
+// "ErrHandler" and the underlying ListenerMux's ErrHandler field is nil, the
+// field will be set to the method. The arguments types of the methods will be
+// registered with the underlying SerialBusReceiver.
+func (sbl *SerialBusListener) RegisterHandlerType(obj interface{}) error {
+	ts, err := sbl.l.RegisterHandlerType(obj)
+	if err != nil {
+		return err
+	}
+	for _, t := range ts {
+		i := reflect.New(t).Elem().Interface()
+		err = sbl.r.Register(i)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

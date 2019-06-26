@@ -228,3 +228,45 @@ func TestUint32RoundTrip(t *testing.T) {
 	var u uint32 = 1234
 	assert.Equal(t, u, sliceToUint32(uint32ToSlice(u)))
 }
+
+type handlerObj chan string
+
+func (ho handlerObj) HandleSignal(s signal) {
+	ho <- "signal"
+}
+
+func (ho handlerObj) HandleStrSlice(s strSlice) {
+	ho <- strings.Join(s, "|")
+}
+
+func (ho handlerObj) HandleFoo(f *Foo) {
+	ho <- f.Name
+}
+
+func (ho handlerObj) ErrHandler(err error) {
+	ho <- "Error: " + err.Error()
+}
+
+func (ho handlerObj) HandleFooErr(f *Foo) error {
+	return errors.New(f.Name)
+}
+
+func TestRegisterHandlers(t *testing.T) {
+	ho := make(handlerObj)
+	bCh := make(chan []byte)
+	js := NewJSONBusSender(bCh)
+	l, err := RunJSONListener(bCh, nil)
+	assert.NoError(t, err)
+	l.RegisterHandlerType(ho)
+
+	js.Send(signal{})
+	assert.Equal(t, "signal", <-ho)
+
+	js.Send(strSlice{"3", "1", "4"})
+	assert.Equal(t, "3|1|4", <-ho)
+
+	js.Send(&Foo{Name: "RegisterHandlers"})
+	assert.Equal(t, "RegisterHandlers", <-ho)
+	assert.Equal(t, "Error: RegisterHandlers", <-ho)
+
+}

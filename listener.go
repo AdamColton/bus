@@ -3,6 +3,7 @@ package bus
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -90,13 +91,13 @@ func (lm *ListenerMux) Register(handler interface{}) (reflect.Type, error) {
 	case reflect.Chan:
 		return lm.registerChan(v)
 	}
-	return nil, errors.New("Register requires a func")
+	return nil, errors.New("Register requires a func or a channel")
 }
 
 func (lm *ListenerMux) registerFunc(v reflect.Value) (reflect.Type, error) {
 	t := v.Type()
 	if t.NumIn() != 1 {
-		return nil, errors.New("Register requires a func that takes one argument")
+		return nil, errors.New("Can only register a func with exactly one argument: " + t.String())
 	}
 	argType := t.In(0)
 	lm.handlers[argType] = append(lm.handlers[argType], v)
@@ -111,4 +112,32 @@ func (lm *ListenerMux) registerChan(v reflect.Value) (reflect.Type, error) {
 	}
 	lm.handlers[argType] = append(lm.handlers[argType], reflect.ValueOf(fn))
 	return argType, nil
+}
+
+// RegisterHandlerType is a bit of reflection magic. It takes a object and
+// iterates over it's methods. Any methods that start with "Handler" will be
+// registered with the ListenerMux. If there is a method named "ErrHandler" and
+// the ListenerMux's ErrHandler field is nil, the field will be set to the
+// method. A slice containing the arugments types of the handlers is returned.
+func (lm *ListenerMux) RegisterHandlerType(obj interface{}) ([]reflect.Type, error) {
+	v := reflect.ValueOf(obj)
+	t := v.Type()
+	ms := v.NumMethod()
+	var ts []reflect.Type
+	for i := 0; i < ms; i++ {
+		tm := t.Method(i)
+		if strings.HasPrefix(tm.Name, "Handle") {
+			at, err := lm.registerFunc(v.Method(i))
+			if err != nil {
+				return ts, err
+			}
+			ts = append(ts, at)
+		} else if tm.Name == "ErrHandler" && lm.ErrHandler == nil {
+			vm := v.Method(i)
+			lm.ErrHandler = func(err error) {
+				vm.Call([]reflect.Value{reflect.ValueOf(err)})
+			}
+		}
+	}
+	return ts, nil
 }

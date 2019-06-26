@@ -44,10 +44,12 @@ func (gb *GobBusSender) Send(msg MessageType) error {
 	return gb.sbs.Send(msg)
 }
 
+// GobMultiBusSender allows a single message to be sent to multiple channels
 type GobMultiBusSender struct {
 	smbs *SerialMultiBusSender
 }
 
+// NewGobMultiBusSender creates a GobMultiBusSender
 func NewGobMultiBusSender() *GobMultiBusSender {
 	return &GobMultiBusSender{
 		smbs: &SerialMultiBusSender{
@@ -57,16 +59,20 @@ func NewGobMultiBusSender() *GobMultiBusSender {
 	}
 }
 
-func (gmb *GobMultiBusSender) Add(key string, ch chan<- []byte) {
-	gmb.smbs.Chans[key] = ch
+// Add a channel by id.
+func (gmb *GobMultiBusSender) Add(id string, ch chan<- []byte) {
+	gmb.smbs.Chans[id] = ch
 }
 
-func (gmb *GobMultiBusSender) Delete(key string) {
-	delete(gmb.smbs.Chans, key)
+// Delete a channel by id.
+func (gmb *GobMultiBusSender) Delete(id string) {
+	delete(gmb.smbs.Chans, id)
 }
 
-func (gmb *GobMultiBusSender) Send(msg MessageType, keys ...string) error {
-	return gmb.smbs.Send(msg, keys...)
+// Send a message to all of the given ids. If no ids are given, the message will
+// be sent to all channels.
+func (gmb *GobMultiBusSender) Send(msg MessageType, id ...string) error {
+	return gmb.smbs.Send(msg, id...)
 }
 
 // GobBusReceiver can recieve messages serialized with SerializeGob.
@@ -95,7 +101,7 @@ func (gb *GobBusReceiver) Run() {
 	gb.r.Run()
 }
 
-// Run the GobBusReceiver
+// Stop the GobBusReceiver
 func (gb *GobBusReceiver) Stop() {
 	gb.r.Stop()
 }
@@ -133,12 +139,18 @@ func RunGobListener(in <-chan []byte, errHandler func(error), handlers ...interf
 }
 
 // Run the GobListener
-func (jl *GobListener) Run() { jl.l.Run() }
+func (gl *GobListener) Run() { gl.l.Run() }
 
 // Stop the GobListener if it is running.
-func (jl *GobListener) Stop() { jl.l.Stop() }
+func (gl *GobListener) Stop() { gl.l.Stop() }
 
 // Register a handler with GobListener.
-func (jl *GobListener) Register(handler interface{}) error {
-	return jl.l.Register(handler)
+func (gl *GobListener) Register(handler interface{}) error {
+	return gl.l.Register(handler)
+}
+
+// RegisterHandlerType registers a Handler Object, see
+// ListenerMux.RegisterHandlerType for more information.
+func (gl *GobListener) RegisterHandlerType(obj interface{}) {
+	gl.l.RegisterHandlerType(obj)
 }

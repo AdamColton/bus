@@ -44,10 +44,12 @@ func (jb *JSONBusSender) Send(msg MessageType) error {
 	return jb.sbs.Send(msg)
 }
 
+// JSONMultiBusSender allows a single message to be sent to multiple channels
 type JSONMultiBusSender struct {
 	smbs *SerialMultiBusSender
 }
 
+// NewJSONMultiBusSender creates a JSONMultiBusSender
 func NewJSONMultiBusSender() *JSONMultiBusSender {
 	return &JSONMultiBusSender{
 		smbs: &SerialMultiBusSender{
@@ -57,14 +59,18 @@ func NewJSONMultiBusSender() *JSONMultiBusSender {
 	}
 }
 
+// Add a channel by id.
 func (jmb *JSONMultiBusSender) Add(key string, ch chan<- []byte) {
 	jmb.smbs.Chans[key] = ch
 }
 
+// Delete a channel by id.
 func (jmb *JSONMultiBusSender) Delete(key string) {
 	delete(jmb.smbs.Chans, key)
 }
 
+// Send a message to all of the given ids. If no ids are given, the message will
+// be sent to all channels.
 func (jmb *JSONMultiBusSender) Send(msg MessageType, keys ...string) error {
 	return jmb.smbs.Send(msg, keys...)
 }
@@ -141,4 +147,10 @@ func (jl *JSONListener) Stop() { jl.l.Stop() }
 // Register a handler with JSONListener.
 func (jl *JSONListener) Register(handler interface{}) error {
 	return jl.l.Register(handler)
+}
+
+// RegisterHandlerType registers a Handler Object, see
+// ListenerMux.RegisterHandlerType for more information.
+func (jl *JSONListener) RegisterHandlerType(obj interface{}) {
+	jl.l.RegisterHandlerType(obj)
 }
