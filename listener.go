@@ -83,9 +83,15 @@ func (lm *ListenerMux) handle(i interface{}) {
 // the handler.
 func (lm *ListenerMux) Register(handler interface{}) (reflect.Type, error) {
 	v := reflect.ValueOf(handler)
-	if v.Kind() != reflect.Func {
-		return nil, errors.New("Register requires a func")
+
+	switch v.Kind() {
+	case reflect.Func:
+		return lm.registerFunc(v)
 	}
+	return nil, errors.New("Register requires a func")
+}
+
+func (lm *ListenerMux) registerFunc(v reflect.Value) (reflect.Type, error) {
 	t := v.Type()
 	if t.NumIn() != 1 {
 		return nil, errors.New("Register requires a func that takes one argument")
