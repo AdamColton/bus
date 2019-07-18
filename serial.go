@@ -95,7 +95,7 @@ outer:
 		case <-r.stop:
 			break outer
 		case b := <-r.In:
-			go r.handle(b)
+			r.handle(b)
 		}
 	}
 }

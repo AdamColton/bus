@@ -48,7 +48,7 @@ outer:
 	for {
 		select {
 		case i := <-lm.in:
-			go lm.handle(i)
+			lm.handle(i)
 		case <-lm.stop:
 			break outer
 		}
