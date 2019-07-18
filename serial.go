@@ -1,48 +1,47 @@
 package bus
 
 import (
-	"reflect"
-	"sync"
+	"errors"
 )
 
-// SerialBusSender combines the logic of serializing an object and placing it
+// SerialSender combines the logic of serializing an object and placing it
 // on a channel
-type SerialBusSender struct {
+type SerialSender struct {
 	Ch        chan<- []byte
-	Serialize func(i interface{}) ([]byte, error)
+	Serialize Serializer
 }
 
 // Send takes a message, serializes it and places it on a channel.
-func (sbs *SerialBusSender) Send(msg interface{}) error {
-	b, err := sbs.Serialize(msg)
+func (s *SerialSender) Send(msg interface{}) error {
+	b, err := s.Serialize(msg)
 	if err != nil {
 		return err
 	}
-	sbs.Ch <- b
+	s.Ch <- b
 	return nil
 }
 
-// SerialMultiBusSender allows one message to be sent to multiple channels.
-type SerialMultiBusSender struct {
+// SerialMultiSender allows one message to be sent to multiple channels.
+type SerialMultiSender struct {
 	Chans     map[string]chan<- []byte
-	Serialize func(i interface{}) ([]byte, error)
+	Serialize Serializer
 }
 
-// Send a message to the ids provided. If no ids are provided, the message will
+// Send a message to the keys provided. If no keys are provided, the message will
 // be sent to all channels.
-func (smbs *SerialMultiBusSender) Send(msg interface{}, ids ...string) error {
-	b, err := smbs.Serialize(msg)
+func (ms *SerialMultiSender) Send(msg interface{}, keys ...string) error {
+	b, err := ms.Serialize(msg)
 	if err != nil {
 		return err
 	}
 
-	if len(ids) == 0 {
-		for _, ch := range smbs.Chans {
+	if len(keys) == 0 {
+		for _, ch := range ms.Chans {
 			ch <- b
 		}
 	} else {
-		for _, id := range ids {
-			if ch, found := smbs.Chans[id]; found {
+		for _, key := range keys {
+			if ch, found := ms.Chans[key]; found {
 				ch <- b
 			}
 		}
@@ -51,128 +50,82 @@ func (smbs *SerialMultiBusSender) Send(msg interface{}, ids ...string) error {
 	return nil
 }
 
-// Deserializer can deserialize a message of any type registered with it.
-type Deserializer interface {
-	Deserialize([]byte) (interface{}, error)
-	Register(interface{}) error
+// Add a chan<- []byte to the SerialMultiSender and associate it with the key.
+// If to is not of type chan<- []byte, an error is returned.
+func (ms *SerialMultiSender) Add(key string, to interface{}) error {
+	ch, ok := to.(chan<- []byte)
+	if !ok {
+		bch, ok := to.(chan []byte)
+		if !ok {
+			return errors.New("Expected chan<- []byte")
+		}
+		ch = bch
+	}
+	ms.Chans[key] = ch
+	return nil
 }
 
-// SerialBusReceiver takes serialized messages off a serial bus, deserializes
-// them and places the deserialized objects on an object bus.
-type SerialBusReceiver struct {
+// AddCh adds a chan<- []byte to the SerialMultiSender and associate it with the
+// key.
+func (ms *SerialMultiSender) AddCh(key string, ch chan<- []byte) {
+	ms.Chans[key] = ch
+}
+
+// Delete a channel by key from the SerialMultiSender.
+func (ms *SerialMultiSender) Delete(key string) {
+	delete(ms.Chans, key)
+}
+
+// SerialReceiver takes serialized messages off a serial bus, deserializes them
+// and places the deserialized objects on an interface channel.
+type SerialReceiver struct {
 	In  <-chan []byte
 	Out chan<- interface{}
 	Deserializer
 	ErrHandler func(error)
-	mux        sync.Mutex
 	stop       chan bool
 }
 
-// Run starts the SerialBusReceiver. It must be running to receive messages.
-func (sbr *SerialBusReceiver) Run() {
-	sbr.mux.Lock()
-	sbr.stop = make(chan bool)
-	for sbr.stop != nil {
+// Run starts the SerialReceiver. It must be running to receive messages.
+func (r *SerialReceiver) Run() {
+	r.stop = make(chan bool)
+outer:
+	for {
 		select {
-		case <-sbr.stop:
-			sbr.stop = nil
-		case b := <-sbr.In:
-			go sbr.handle(b)
+		case <-r.stop:
+			break outer
+		case b := <-r.In:
+			go r.handle(b)
 		}
 	}
-	sbr.mux.Unlock()
 }
 
-// Stop the SerialBusReceiver
-func (sbr *SerialBusReceiver) Stop() {
-	if sbr.stop != nil {
-		sbr.stop <- true
+// Stop the SerialReceiver
+func (r *SerialReceiver) Stop() {
+	if r.stop != nil {
+		close(r.stop)
 	}
 }
 
-func (sbr *SerialBusReceiver) handle(b []byte) {
-	i, err := sbr.Deserialize(b)
+func (r *SerialReceiver) handle(b []byte) {
+	i, err := r.Deserialize(b)
 	if err != nil {
-		if sbr.ErrHandler != nil {
-			sbr.ErrHandler(err)
+		if r.ErrHandler != nil {
+			r.ErrHandler(err)
 		}
 		return
 	}
-	sbr.Out <- i
+	r.Out <- i
 }
 
-// SerialBusListener combines a SerialBusReceiver with a BusListenerMux which
-// takes the deserialized objects and passes them to their correct handlers.
-type SerialBusListener struct {
-	r *SerialBusReceiver
-	l *ListenerMux
+// SetOut sets the outgoing interface channel.
+func (r *SerialReceiver) SetOut(out chan<- interface{}) {
+	r.Out = out
 }
 
-// NewSerialBusListener creates a SerialBusListener from a SerialBusReceiver.
-// The Out channel on the SerialBusReceiver will be overridden.
-func NewSerialBusListener(r *SerialBusReceiver, errHandler func(error)) *SerialBusListener {
-	ch := make(chan interface{})
-	r.Out = ch
-	return &SerialBusListener{
-		r: r,
-		l: NewListenerMux(ch, errHandler),
+// SetErrorHandler to errHandler if ErrHandler is currently nil.
+func (r *SerialReceiver) SetErrorHandler(errHandler func(error)) {
+	if r.ErrHandler == nil {
+		r.ErrHandler = errHandler
 	}
-}
-
-// RunNewSerialBusListener creates a SerialBusListener from a SerialBusReceiver,
-// registers any handlers passed in and runs the SerialBusListener in a Go
-// routine.
-func RunNewSerialBusListener(r *SerialBusReceiver, errHandler func(error), handlers ...interface{}) (*SerialBusListener, error) {
-	sbl := NewSerialBusListener(r, errHandler)
-	for _, h := range handlers {
-		if err := sbl.Register(h); err != nil {
-			return nil, err
-		}
-	}
-	go sbl.Run()
-	return sbl, nil
-}
-
-// Run both the SerialBusReceiver and the BusListenerMux.
-func (sbl *SerialBusListener) Run() {
-	go sbl.r.Run()
-	sbl.l.Run()
-}
-
-// Stop both the SerialBusReceiver and the BusListenerMux.
-func (sbl *SerialBusListener) Stop() {
-	go sbl.r.Stop()
-	go sbl.l.Stop()
-}
-
-// Register a handler. The handler is registered with the BusListenerMux and the
-// argument to the handler is registered with the SerialBusReceiver.
-func (sbl *SerialBusListener) Register(handler interface{}) error {
-	t, err := sbl.l.Register(handler)
-	if err != nil {
-		return err
-	}
-	i := reflect.New(t).Elem().Interface()
-	return sbl.r.Register(i)
-}
-
-// RegisterHandlerType is a bit of reflection magic. It takes a object and
-// iterates over it's methods. Any methods that start with "Handler" will be
-// registered with the underlying ListenerMux. If there is a method named
-// "ErrHandler" and the underlying ListenerMux's ErrHandler field is nil, the
-// field will be set to the method. The arguments types of the methods will be
-// registered with the underlying SerialBusReceiver.
-func (sbl *SerialBusListener) RegisterHandlerType(obj interface{}) error {
-	ts, err := sbl.l.RegisterHandlerType(obj)
-	if err != nil {
-		return err
-	}
-	for _, t := range ts {
-		i := reflect.New(t).Elem().Interface()
-		err = sbl.r.Register(i)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
